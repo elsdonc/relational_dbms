@@ -8,6 +8,28 @@ InputBuffer* newInputBuffer() {
     return inputBuffer;
 }
 
+void printPrompt() {
+    printf("db > ");
+}
+
+void readInput(InputBuffer* inputBuffer) {
+    size_t bytesRead = getline(&(inputBuffer->buffer), &(inputBuffer->bufferLen), stdin);
+    
+    if (bytesRead <= 0) {
+        printf("Error reading input\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // remove trailing newline that came from calling getline()
+    inputBuffer->buffer[bytesRead - 1] = 0;
+    inputBuffer->inputLen = bytesRead - 1;
+}
+
+void closeInputBuffer(InputBuffer* inputBuffer) {
+    free(inputBuffer->buffer);
+    free(inputBuffer);
+}
+
 int main(int argc, char* argv[]) {
     // infinite read-execute-print loop (REPL)
     InputBuffer* inputBuffer = newInputBuffer();
