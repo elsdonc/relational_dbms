@@ -8,6 +8,22 @@ InputBuffer* newInputBuffer() {
     return inputBuffer;
 }
 
+Table* newTable() {
+    Table* table = (Table*) malloc(sizeof(Table));
+    table->numRows = 0;
+    for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
+        table->pages[i] = NULL;
+    }
+    return table;
+}
+
+void free_table(Table* table) {
+    for (int i = 0; table->pages[i]; i++) {
+	    free(table->pages[i]);
+    }
+    free(table);
+}
+
 void printPrompt() {
     printf("db > ");
 }
@@ -42,6 +58,12 @@ MetaCommandResult execMetaCommand(InputBuffer* inputBuffer) {
 PrepareResult prepareStatement(InputBuffer* inputBuffer, Statement* statement) {
     if (strncmp(inputBuffer->buffer, "insert", 6) == 0) {
         statement->type = STATEMENT_INSERT;
+        int args = sscanf(
+            inputBuffer->buffer, "insert %d %s %s", &(statement->rowToInsert.id), statement->rowToInsert.username, statement->rowToInsert.email
+        );
+        if (args < 3) {
+            return PREPARE_SYNTAX_ERROR;
+        }
         return PREPARE_SUCCESS;
     } else if (strncmp(inputBuffer->buffer, "select", 6) == 0) {
         statement->type = STATEMENT_SELECT;
@@ -51,18 +73,67 @@ PrepareResult prepareStatement(InputBuffer* inputBuffer, Statement* statement) {
     }
 }
 
-void executeStatement(Statement* statement) {
+ExecuteResult executeStatement(Statement* statement, Table* table) {
     switch (statement->type) {
         case (STATEMENT_INSERT):
-            printf("execute insert here...\n");
-            break;
+            return executeInsert(statement, table);
         case (STATEMENT_SELECT):
-            printf("execute select here...\n");
-            break;
+            return executeSelect(statement, table);
     }
 }
 
+ExecuteResult executeInsert(Statement* statement, Table* table) {
+    if (table->numRows >= TABLE_MAX_ROWS) {
+        return EXECUTE_TABLE_FULL;
+    }
+
+    Row* rowToInsert = &(statement->rowToInsert);
+
+    serializeRow(rowToInsert, rowSlot(table, table->numRows));
+    table->numRows += 1;
+
+    return EXECUTE_SUCCESS;
+}
+
+ExecuteResult executeSelect(Statement* statement, Table* table) {
+    Row row;
+    for (uint32_t i = 0; i < table->numRows; i++) {
+        deserializeRow(rowSlot(table, i), &row);
+        printRow(&row);
+    }
+    return EXECUTE_SUCCESS;
+}
+
+void serializeRow(Row* source, void* destination) {
+    memcpy(destination + ID_OFFSET, &(source->id), ID_SIZE);
+    memcpy(destination + USERNAME_OFFSET, &(source->username), USERNAME_SIZE);
+    memcpy(destination + EMAIL_OFFSET, &(source->email), EMAIL_SIZE);
+}
+
+void deserializeRow(void* source, Row* destination) {
+    memcpy(&(destination->id), source + ID_OFFSET, ID_SIZE);
+    memcpy(&(destination->username), source + USERNAME_OFFSET, USERNAME_SIZE);
+    memcpy(&(destination->email), source + EMAIL_OFFSET, EMAIL_SIZE);
+}
+
+void* rowSlot(Table* table, uint32_t rowNum) {
+    uint32_t page_num = rowNum / ROWS_PER_PAGE;
+    void* page = table->pages[page_num];
+    if (page == NULL) {
+        // Allocate memory only when we try to access page
+        page = table->pages[page_num] = malloc(PAGE_SIZE);
+    }
+    uint32_t row_offset = rowNum % ROWS_PER_PAGE;
+    uint32_t byte_offset = row_offset * ROW_SIZE;
+    return page + byte_offset;
+}
+
+void printRow(Row* row) {
+    printf("(%d, %s, %s)\n", row->id, row->username, row->email);
+}
+
 int main(int argc, char* argv[]) {
+    Table* table = newTable();
     // infinite read-execute-print loop (REPL)
     InputBuffer* inputBuffer = newInputBuffer();
     while (true) {
@@ -85,11 +156,21 @@ int main(int argc, char* argv[]) {
         switch (prepareStatement(inputBuffer, &statement)) {
             case (PREPARE_SUCCESS):
                 break;
+            case (PREPARE_SYNTAX_ERROR):
+                printf("Syntax error. Couldn't parse statement\n");
+                continue;
             case (PREPARE_UNRECOGNIZED):
                 printf("Unrecognized keyword at start of '%s'\n", inputBuffer->buffer);
                 continue;
         }
-        executeStatement(&statement);
-        printf("Executed.\n");
+
+        switch (executeStatement(&statement, table)) {
+            case (EXECUTE_SUCCESS):
+                printf("Executed.\n");
+                break;
+            case (EXECUTE_TABLE_FULL):
+                printf("Error: Table full.\n");
+                break;
+        }
     }
 }
