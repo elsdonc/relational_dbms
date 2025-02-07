@@ -6,6 +6,9 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 typedef struct {
     char* buffer;
@@ -66,14 +69,36 @@ const uint32_t PAGE_SIZE = 4096;
 const uint32_t ROWS_PER_PAGE = PAGE_SIZE / ROW_SIZE;
 const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * TABLE_MAX_PAGES;
 
+// structure that will access page cache and the file
+typedef struct {
+    int fileDescriptor;
+    uint32_t fileLength;
+    void* pages[TABLE_MAX_PAGES];
+} Pager;
+
 // structure to represent in-memory database table
 typedef struct {
     uint32_t numRows;
-    void* pages[TABLE_MAX_PAGES];
+    Pager* pager;
 } Table;
 
 // constructor for an input buffer
 InputBuffer* newInputBuffer();
+
+// opening database file, initializing pager and table
+Table* dbOpen(const char* filename);
+
+// flush cache to disk, close database file, frees memory for Pager and Table
+void dbClose(Table* table);
+
+// opens database file, tracks its size, and initializes page caches to NULL
+Pager* pagerOpen(const char* filename);
+
+// flushes page cache to disk
+void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size);
+
+// handles cache miss
+void* getPage(Pager* pager, uint32_t pageNum);
 
 // prints a prompt to the user
 void printPrompt();
@@ -85,7 +110,7 @@ void readInput(InputBuffer* inputBuffer);
 void closeInputBuffer(InputBuffer* inputBuffer);
 
 // executes a meta command (meta commands start with a '.' character)
-MetaCommandResult execMetaCommand(InputBuffer* inputBuffer);
+MetaCommandResult execMetaCommand(InputBuffer* inputBuffer, Table* table);
 
 // prepares the statement by identifying keywords and setting statement->type
 PrepareResult prepareStatement(InputBuffer* InputBuffer, Statement* statement);
