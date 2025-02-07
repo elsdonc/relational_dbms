@@ -132,6 +132,24 @@ void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size) {
     }
 }
 
+Cursor* tableStart(Table* table) {
+    Cursor* cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->rowNum = 0;
+    cursor->endOfTable = (table->numRows == 0);
+
+    return cursor;
+}
+
+Cursor* tableEnd(Table* table) {
+    Cursor* cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->rowNum = table->numRows;
+    cursor->endOfTable = true;
+
+    return cursor;
+}
+
 void printPrompt() {
     printf("db > ");
 }
@@ -226,19 +244,25 @@ ExecuteResult executeInsert(Statement* statement, Table* table) {
     }
 
     Row* rowToInsert = &(statement->rowToInsert);
-
-    serializeRow(rowToInsert, rowSlot(table, table->numRows));
+    Cursor* cursor = tableEnd(table);
+    serializeRow(rowToInsert, cursorValue(cursor));
     table->numRows += 1;
 
     return EXECUTE_SUCCESS;
 }
 
 ExecuteResult executeSelect(Statement* statement, Table* table) {
+    Cursor* cursor = tableStart(table);
+
     Row row;
-    for (uint32_t i = 0; i < table->numRows; i++) {
-        deserializeRow(rowSlot(table, i), &row);
+    while (!(cursor->endOfTable)) {
+        deserializeRow(cursorValue(cursor), &row);
         printRow(&row);
+        cursorAdvance(cursor);
     }
+
+    free(cursor);
+    
     return EXECUTE_SUCCESS;
 }
 
@@ -254,12 +278,20 @@ void deserializeRow(void* source, Row* destination) {
     memcpy(&(destination->email), source + EMAIL_OFFSET, EMAIL_SIZE);
 }
 
-void* rowSlot(Table* table, uint32_t rowNum) {
+void* cursorValue(Cursor* cursor) {
+    uint32_t rowNum = cursor->rowNum;
     uint32_t pageNum = rowNum / ROWS_PER_PAGE;
-    void* page = getPage(table->pager, pageNum);
+    void* page = getPage(cursor->table->pager, pageNum);
     uint32_t row_offset = rowNum % ROWS_PER_PAGE;
     uint32_t byte_offset = row_offset * ROW_SIZE;
     return page + byte_offset;
+}
+
+void cursorAdvance(Cursor* cursor) {
+    cursor->rowNum += 1;
+    if (cursor->rowNum >= cursor->table->numRows) {
+        cursor->endOfTable = true;
+    }
 }
 
 void printRow(Row* row) {

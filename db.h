@@ -53,6 +53,12 @@ typedef struct {
     Row rowToInsert;
 } Statement;
 
+typedef struct {
+    Table* table;
+    uint32_t rowNum;
+    bool endOfTable;
+} Cursor;
+
 // sizes and offsets for row storage
 #define sizeOfAttribute(Struct, Attribute) sizeof(((Struct*)0)->Attribute)
 const uint32_t ID_SIZE = sizeOfAttribute(Row, id);
@@ -100,6 +106,10 @@ void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size);
 // handles cache miss
 void* getPage(Pager* pager, uint32_t pageNum);
 
+// create new cursors at start and end of table
+Cursor* tableStart(Table* table);
+Cursor* tableEnd(Table* table);
+
 // prints a prompt to the user
 void printPrompt();
 
@@ -131,8 +141,11 @@ void serializeRow(Row* source, void* destination);
 // convert from compact representation of row
 void deserializeRow(void* source, Row* destination);
 
-// figure out where to read/write in memory for a row
-void* rowSlot(Table* table, uint32_t rowNum);
+// returns a pointer to the position described by the cursor
+void* cursorValue(Cursor* cursor);
+
+// advance cursor to the next row
+void cursorAdvance(Cursor* cursor);
 
 // prints a row's data to standard output
 void printRow(Row* row);
