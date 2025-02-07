@@ -73,6 +73,36 @@ PrepareResult prepareStatement(InputBuffer* inputBuffer, Statement* statement) {
     }
 }
 
+PrepareResult prepareInsert(InputBuffer* inputBuffer, Statement* statement) {
+    statement->type = STATEMENT_INSERT;
+
+    char* keyword = strtok(inputBuffer->buffer, " ");
+    char* idString = strtok(NULL, " ");
+    char* username = strtok(NULL, " ");
+    char* email = strtok(NULL, " ");
+
+    if (idString == NULL || username == NULL || email == NULL) {
+        return PREPARE_SYNTAX_ERROR;
+    }
+
+    int id = atoi(idString);
+    if (id < 0) {
+        return PREPARE_NEGATIVE_ID;
+    }
+    if (strlen(username) > COLUMN_USERNAME_SIZE) {
+        return PREPARE_STRING_TOO_LONG;
+    }
+    if (strlen(email) > COLUMN_EMAIL_SIZE) {
+        return PREPARE_STRING_TOO_LONG;
+    }
+
+    statement->rowToInsert.id = id;
+    strcpy(statement->rowToInsert.username, username);
+    strcpy(statement->rowToInsert.email, email);
+
+    return PREPARE_SUCCESS;
+}
+
 ExecuteResult executeStatement(Statement* statement, Table* table) {
     switch (statement->type) {
         case (STATEMENT_INSERT):
@@ -156,6 +186,12 @@ int main(int argc, char* argv[]) {
         switch (prepareStatement(inputBuffer, &statement)) {
             case (PREPARE_SUCCESS):
                 break;
+            case (PREPARE_NEGATIVE_ID):
+                printf("ID must be positive.\n");
+                continue;
+            case (PREPARE_STRING_TOO_LONG):
+                printf("String is too long.\n");
+                continue;
             case (PREPARE_SYNTAX_ERROR):
                 printf("Syntax error. Couldn't parse statement\n");
                 continue;

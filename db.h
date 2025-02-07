@@ -21,7 +21,9 @@ typedef enum {
 typedef enum {
     PREPARE_SUCCESS,
     PREPARE_UNRECOGNIZED,
-    PREPARE_SYNTAX_ERROR
+    PREPARE_SYNTAX_ERROR,
+    PREPARE_STRING_TOO_LONG,
+    PREPARE_NEGATIVE_ID
 } PrepareResult;
 
 typedef enum {
@@ -39,8 +41,8 @@ typedef enum {
 #define COLUMN_EMAIL_SIZE 255
 typedef struct {
     uint32_t id;
-    char username[COLUMN_USERNAME_SIZE];
-    char email[COLUMN_EMAIL_SIZE];
+    char username[COLUMN_USERNAME_SIZE + 1];
+    char email[COLUMN_EMAIL_SIZE + 1];
 } Row;
 
 typedef struct {
@@ -87,6 +89,9 @@ MetaCommandResult execMetaCommand(InputBuffer* inputBuffer);
 
 // prepares the statement by identifying keywords and setting statement->type
 PrepareResult prepareStatement(InputBuffer* InputBuffer, Statement* statement);
+
+// check length of each string in statement to avoid buffer overflow
+PrepareResult prepareInsert(InputBuffer* inputBuffer, Statement* statement);
 
 // identifies statement type and executes statement
 ExecuteResult executeStatement(Statement* statement, Table* table);
