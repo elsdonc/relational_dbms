@@ -32,7 +32,8 @@ typedef enum {
 typedef enum {
     EXECUTE_SUCCESS,
     EXECUTE_SYTAX_ERROR,
-    EXECUTE_TABLE_FULL
+    EXECUTE_TABLE_FULL,
+    EXECUTE_DUPLICATE_KEY
 } ExecuteResult;
 
 typedef enum {
@@ -135,9 +136,11 @@ void pagerFlush(Pager* pager, uint32_t pageNum);
 // handles cache miss
 void* getPage(Pager* pager, uint32_t pageNum);
 
-// create new cursors at start and end of table
+// create new cursors at start of table
 Cursor* tableStart(Table* table);
-Cursor* tableEnd(Table* table);
+
+// search tree for a key
+Cursor* tableFind(Table* table, uint32_t key);
 
 // prints a prompt to the user
 void printPrompt();
@@ -188,6 +191,13 @@ void initializeLeafNode(void* node);
 
 // insert key/value pair into a leaf node
 void leafNodeInsert(Cursor* cursor, uint32_t key, Row* value);
+
+// binary search for a node
+Cursor* leafNodeFind(Table* table, uint32_t pageNum, uint32_t key);
+
+// get and set node type
+NodeType getNodeType(void* node);
+void setNodeType(void* node, NodeType type);
 
 // visualize btree
 void printLeafNode(void* node);

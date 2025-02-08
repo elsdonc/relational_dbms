@@ -148,17 +148,54 @@ Cursor* tableStart(Table* table) {
     return cursor;
 }
 
-Cursor* tableEnd(Table* table) {
+Cursor* tableFind(Table* table, uint32_t key) {
+    uint32_t rootPageNum = table->rootPageNum;
+    void* rootNode = getPage(table->pager, rootPageNum);
+
+    if (getNodeType(rootNode) == NODE_LEAF) {
+        return leafNodeFind(table, rootPageNum, key);
+    } else {
+        printf("will implement searching an internal node here\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+Cursor* leafNodeFind(Table* table, uint32_t pageNum, uint32_t key) {
+    void* node = getPage(table->pager, pageNum);
+    uint32_t numCells = *leafNodeNumCells(node);
+
     Cursor* cursor = malloc(sizeof(Cursor));
     cursor->table = table;
-    cursor->pageNum = table->rootPageNum;
+    cursor->pageNum = pageNum;
 
-    void* rootNode = getPage(table->pager, table->rootPageNum);
-    uint32_t numCells = *leafNodeNumCells(rootNode);
-    cursor->cellNum = numCells;
-    cursor->endOfTable = true;
+    // binary search
+    uint32_t l = 0;
+    uint32_t r = numCells;
+    while (l < r) {
+        uint32_t mid = (l + r) / 2;
+        uint32_t keyAtMid = *leafNodeKey(node, mid);
+        if (key == keyAtMid) {
+            cursor->cellNum = mid;
+            return cursor;
+        } else if (key < keyAtMid) {
+            r = mid;
+        } else {
+            l = mid + 1;
+        }
+    }
 
+    cursor->cellNum = l;
     return cursor;
+}
+
+NodeType getNodeType(void* node) {
+    uint8_t value = *((uint8_t*)(node + NODE_TYPE_OFFSET));
+    return (NodeType)value;
+}
+
+void setNodeType(void* node, NodeType type) {
+    uint8_t value = type;
+    *((uint8_t*)(node + NODE_TYPE_OFFSET)) = value;
 }
 
 void printPrompt() {
@@ -255,12 +292,22 @@ ExecuteResult executeStatement(Statement* statement, Table* table) {
 
 ExecuteResult executeInsert(Statement* statement, Table* table) {
     void* node = getPage(table->pager, table->rootPageNum);
-    if ((*leafNodeNumCells(node) >= LEAF_NODE_MAX_CELLS)) {
+    uint32_t numCells = (*leafNodeNumCells(node));
+    if (numCells >= LEAF_NODE_MAX_CELLS) {
         return EXECUTE_TABLE_FULL;
     }
 
     Row* rowToInsert = &(statement->rowToInsert);
-    Cursor* cursor = tableEnd(table);
+    uint32_t keyToInsert = rowToInsert->id;
+    Cursor* cursor = tableFind(table, keyToInsert);
+
+    if (cursor->cellNum < numCells) {
+        uint32_t keyAtIndex = *leafNodeKey(node, cursor->cellNum);
+        if (keyAtIndex == keyToInsert) {
+            return EXECUTE_DUPLICATE_KEY;
+        }
+    }
+
     leafNodeInsert(cursor, rowToInsert->id, rowToInsert);
 
     return EXECUTE_SUCCESS;
@@ -330,6 +377,7 @@ void* leafNodeValue(void* node, uint32_t cellNum) {
 }
 
 void initializeLeafNode(void* node) {
+    setNodeType(node, NODE_LEAF);
     *leafNodeNumCells(node) = 0;
 }
 
@@ -412,6 +460,9 @@ int main(int argc, char* argv[]) {
         switch (executeStatement(&statement, table)) {
             case (EXECUTE_SUCCESS):
                 printf("Executed.\n");
+                break;
+            case (EXECUTE_DUPLICATE_KEY):
+                printf("Error: Duplicate key.\n");
                 break;
             case (EXECUTE_TABLE_FULL):
                 printf("Error: Table full.\n");
