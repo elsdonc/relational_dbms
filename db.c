@@ -10,37 +10,30 @@ InputBuffer* newInputBuffer() {
 
 Table* dbOpen(const char* filename) {
     Pager* pager = pagerOpen(filename);
-    uint32_t numRows = pager->fileLength / ROW_SIZE;
 
     Table* table = (Table*) malloc(sizeof(Table));
     table->pager = pager;
-    table->numRows = numRows;
+    table->rootPageNum = 0;
+
+    if(pager->numPages == 0) {
+        // new db file. Initialize page 0 as leaf node.
+        void* rootNode = getPage(pager, 0);
+        initializeLeafNode(rootNode);
+    }
 
     return table;
 }
 
 void dbClose(Table* table) {
     Pager* pager = table->pager;
-    uint32_t numFullPages = table->numRows / ROWS_PER_PAGE;
 
-    for (uint32_t i = 0; i < numFullPages; i++) {
+    for (uint32_t i = 0; i < pager->numPages; i++) {
         if (pager->pages[i] == NULL) {
             continue;
         }
-        pagerFlush(pager, i, PAGE_SIZE);
+        pagerFlush(pager, i);
         free(pager->pages[i]);
         pager->pages[i] = NULL;
-    }
-
-    // handle partial page at end of file
-    uint32_t numAdditionalRows = table->numRows % ROWS_PER_PAGE;
-    if (numAdditionalRows > 0) {
-        uint32_t pageNum = numFullPages;
-        if (pager->pages[pageNum] != NULL) {
-            pagerFlush(pager, pageNum, numAdditionalRows * ROW_SIZE);
-            free(pager->pages[pageNum]);
-            pager->pages[pageNum] = NULL;
-        }
     }
 
     if (close(pager->fileDescriptor) == -1) {
@@ -72,6 +65,12 @@ Pager* pagerOpen(const char* filename) {
     Pager* pager = malloc(sizeof(Pager));
     pager->fileDescriptor = fd;
     pager->fileLength = fileLength;
+    pager->numPages = (fileLength / PAGE_SIZE);
+
+    if (fileLength % PAGE_SIZE != 0) {
+        printf("DB file is corrupt. It isn't a whole number of pages.\n");
+        exit(EXIT_FAILURE);
+    }
 
     for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
         pager->pages[i] = NULL;
@@ -106,12 +105,16 @@ void* getPage(Pager* pager, uint32_t pageNum) {
         }
 
         pager->pages[pageNum] = page;
+
+        if (pageNum >= pager->numPages) {
+            pager->numPages = pageNum + 1;
+        }
     }
 
     return pager->pages[pageNum];
 }
 
-void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size) {
+void pagerFlush(Pager* pager, uint32_t pageNum) {
     if (pager->pages[pageNum] == NULL) {
         printf("Error flushing null page\n");
         exit(EXIT_FAILURE);
@@ -124,7 +127,7 @@ void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size) {
         exit(EXIT_FAILURE);
     }
 
-    ssize_t bytesWritten = write(pager->fileDescriptor, pager->pages[pageNum], size);
+    ssize_t bytesWritten = write(pager->fileDescriptor, pager->pages[pageNum], PAGE_SIZE);
 
     if (bytesWritten == -1) {
         perror("Error writing file\n");
@@ -135,8 +138,12 @@ void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size) {
 Cursor* tableStart(Table* table) {
     Cursor* cursor = malloc(sizeof(Cursor));
     cursor->table = table;
-    cursor->rowNum = 0;
-    cursor->endOfTable = (table->numRows == 0);
+    cursor->pageNum = table->rootPageNum;
+    cursor->cellNum = 0;
+
+    void* rootNode = getPage(table->pager, table->rootPageNum);
+    uint32_t numCells = *leafNodeNumCells(rootNode);
+    cursor->endOfTable = (numCells == 0);
 
     return cursor;
 }
@@ -144,7 +151,11 @@ Cursor* tableStart(Table* table) {
 Cursor* tableEnd(Table* table) {
     Cursor* cursor = malloc(sizeof(Cursor));
     cursor->table = table;
-    cursor->rowNum = table->numRows;
+    cursor->pageNum = table->rootPageNum;
+
+    void* rootNode = getPage(table->pager, table->rootPageNum);
+    uint32_t numCells = *leafNodeNumCells(rootNode);
+    cursor->cellNum = numCells;
     cursor->endOfTable = true;
 
     return cursor;
@@ -176,6 +187,10 @@ MetaCommandResult execMetaCommand(InputBuffer* inputBuffer, Table* table) {
     if (strcmp(inputBuffer->buffer, ".exit") == 0) {
         dbClose(table);
         exit(EXIT_SUCCESS);
+    } else if (strcmp(inputBuffer->buffer, ".btree") == 0) {
+        printf("Tree:\n");
+        printLeafNode(getPage(table->pager, 0));
+        return META_COMMAND_SUCCESS;
     } else {
         return META_COMMAND_UNRECOGNIZED;
     }
@@ -239,14 +254,14 @@ ExecuteResult executeStatement(Statement* statement, Table* table) {
 }
 
 ExecuteResult executeInsert(Statement* statement, Table* table) {
-    if (table->numRows >= TABLE_MAX_ROWS) {
+    void* node = getPage(table->pager, table->rootPageNum);
+    if ((*leafNodeNumCells(node) >= LEAF_NODE_MAX_CELLS)) {
         return EXECUTE_TABLE_FULL;
     }
 
     Row* rowToInsert = &(statement->rowToInsert);
     Cursor* cursor = tableEnd(table);
-    serializeRow(rowToInsert, cursorValue(cursor));
-    table->numRows += 1;
+    leafNodeInsert(cursor, rowToInsert->id, rowToInsert);
 
     return EXECUTE_SUCCESS;
 }
@@ -279,23 +294,74 @@ void deserializeRow(void* source, Row* destination) {
 }
 
 void* cursorValue(Cursor* cursor) {
-    uint32_t rowNum = cursor->rowNum;
-    uint32_t pageNum = rowNum / ROWS_PER_PAGE;
+    uint32_t pageNum = cursor->pageNum;
     void* page = getPage(cursor->table->pager, pageNum);
-    uint32_t row_offset = rowNum % ROWS_PER_PAGE;
-    uint32_t byte_offset = row_offset * ROW_SIZE;
-    return page + byte_offset;
+    return leafNodeValue(page, cursor->cellNum);
 }
 
 void cursorAdvance(Cursor* cursor) {
-    cursor->rowNum += 1;
-    if (cursor->rowNum >= cursor->table->numRows) {
+    uint32_t pageNum = cursor->pageNum;
+    void* node = getPage(cursor->table->pager, pageNum);
+
+    cursor->cellNum += 1;
+    if (cursor->cellNum >= (*leafNodeNumCells(node))) {
         cursor->endOfTable = true;
     }
 }
 
 void printRow(Row* row) {
     printf("(%d, %s, %s)\n", row->id, row->username, row->email);
+}
+
+uint32_t* leafNodeNumCells(void* node) {
+    return node + LEAF_NODE_NUM_CELLS_OFFSET;
+}
+
+void* leafNodeCell(void* node, uint32_t cellNum) {
+    return node + LEAF_NODE_HEADER_SIZE + cellNum * LEAF_NODE_CELL_SIZE;
+}
+
+uint32_t* leafNodeKey(void* node, uint32_t cellNum) {
+    return leafNodeCell(node, cellNum);
+}
+
+void* leafNodeValue(void* node, uint32_t cellNum) {
+    return leafNodeCell(node, cellNum) + LEAF_NODE_KEY_SIZE;
+}
+
+void initializeLeafNode(void* node) {
+    *leafNodeNumCells(node) = 0;
+}
+
+void leafNodeInsert(Cursor* cursor, uint32_t key, Row* value) {
+    void* node = getPage(cursor->table->pager, cursor->pageNum);
+
+    uint32_t numCells = *leafNodeNumCells(node);
+    if (numCells >= LEAF_NODE_MAX_CELLS) {
+        // node full
+        printf("Splitting leaf node logic will go here.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (cursor->cellNum < numCells) {
+        // make room for new cell
+        for (uint32_t i = numCells; i > cursor->cellNum; i--) {
+            memcpy(leafNodeCell(node, i), leafNodeCell(node, i - 1), LEAF_NODE_CELL_SIZE);
+        }
+    }
+
+    *(leafNodeNumCells(node)) += 1;
+    *(leafNodeKey(node, cursor->cellNum)) = key;
+    serializeRow(value, leafNodeValue(node, cursor->cellNum));
+}
+
+void printLeafNode(void* node) {
+    uint32_t numCells = *leafNodeNumCells(node);
+    printf("leaf (size %d)\n", numCells);
+    for (uint32_t i = 0; i < numCells; i++) {
+        uint32_t key = *leafNodeKey(node, i);
+        printf(" - %d : %d\n", i, key);
+    }
 }
 
 int main(int argc, char* argv[]) {

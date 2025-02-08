@@ -53,12 +53,6 @@ typedef struct {
     Row rowToInsert;
 } Statement;
 
-typedef struct {
-    Table* table;
-    uint32_t rowNum;
-    bool endOfTable;
-} Cursor;
-
 // sizes and offsets for row storage
 #define sizeOfAttribute(Struct, Attribute) sizeof(((Struct*)0)->Attribute)
 const uint32_t ID_SIZE = sizeOfAttribute(Row, id);
@@ -79,14 +73,49 @@ const uint32_t TABLE_MAX_ROWS = ROWS_PER_PAGE * TABLE_MAX_PAGES;
 typedef struct {
     int fileDescriptor;
     uint32_t fileLength;
+    uint32_t numPages;
     void* pages[TABLE_MAX_PAGES];
 } Pager;
 
-// structure to represent in-memory database table
 typedef struct {
-    uint32_t numRows;
     Pager* pager;
+    uint32_t rootPageNum;
 } Table;
+
+typedef struct {
+    Table* table;
+    uint32_t pageNum;
+    uint32_t cellNum;
+    bool endOfTable;
+} Cursor;
+
+typedef enum {
+    NODE_INTERNAL,
+    NODE_LEAF
+} NodeType;
+
+// Node Header Layout
+const uint32_t NODE_TYPE_SIZE = sizeof(uint8_t);
+const uint32_t NODE_TYPE_OFFSET = 0;
+const uint32_t IS_ROOT_SIZE = sizeof(uint8_t);
+const uint32_t IS_ROOT_OFFSET = NODE_TYPE_SIZE;
+const uint32_t PARENT_POINTER_SIZE = sizeof(uint32_t);
+const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE;
+const uint8_t COMMON_NODE_HEADER_SIZE = NODE_TYPE_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE;
+
+// Leaf Node Header Layout
+const uint32_t LEAF_NODE_NUM_CELLS_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = COMMON_NODE_HEADER_SIZE;
+const uint32_t LEAF_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + LEAF_NODE_NUM_CELLS_SIZE;
+
+// Leaf Node Body Layout
+const uint32_t LEAF_NODE_KEY_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_KEY_OFFSET = 0;
+const uint32_t LEAF_NODE_VALUE_SIZE = ROW_SIZE;
+const uint32_t LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
+const uint32_t LEAF_NODE_CELL_SIZE = LEAF_NODE_KEY_SIZE + LEAF_NODE_VALUE_SIZE;
+const uint32_t LEAF_NODE_SPACE_FOR_CELLS = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
+const uint32_t LEAF_NODE_MAX_CELLS = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
 
 // constructor for an input buffer
 InputBuffer* newInputBuffer();
@@ -101,7 +130,7 @@ void dbClose(Table* table);
 Pager* pagerOpen(const char* filename);
 
 // flushes page cache to disk
-void pagerFlush(Pager* pager, uint32_t pageNum, uint32_t size);
+void pagerFlush(Pager* pager, uint32_t pageNum);
 
 // handles cache miss
 void* getPage(Pager* pager, uint32_t pageNum);
@@ -149,5 +178,18 @@ void cursorAdvance(Cursor* cursor);
 
 // prints a row's data to standard output
 void printRow(Row* row);
+
+// access keys, values, and metadata
+uint32_t* leafNodeNumCells(void* node);
+void* leafNodeCell(void* node, uint32_t cellNum);
+uint32_t* leafNodeKey(void* node, uint32_t cellNum);
+void* leafNodeValue(void* node, uint32_t cellNum);
+void initializeLeafNode(void* node);
+
+// insert key/value pair into a leaf node
+void leafNodeInsert(Cursor* cursor, uint32_t key, Row* value);
+
+// visualize btree
+void printLeafNode(void* node);
 
 #endif // DB_H_
