@@ -160,8 +160,7 @@ Cursor* tableFind(Table* table, uint32_t key) {
     if (getNodeType(rootNode) == NODE_LEAF) {
         return leafNodeFind(table, rootPageNum, key);
     } else {
-        printf("will implement searching an internal node here\n");
-        exit(EXIT_FAILURE);
+        return internalNodeFind(table, rootPageNum, key);
     }
 }
 
@@ -191,6 +190,34 @@ Cursor* leafNodeFind(Table* table, uint32_t pageNum, uint32_t key) {
 
     cursor->cellNum = l;
     return cursor;
+}
+
+Cursor* internalNodeFind(Table* table, uint32_t pageNum, uint32_t key) {
+    void* node =getPage(table->pager, pageNum);
+    uint32_t numKeys = *internalNodeNumKeys(node);
+
+    // binary search to find index of child to search
+    uint32_t l = 0;
+    uint32_t r = numKeys;
+
+    while (l < r) {
+        uint32_t mid = (l + r) / 2;
+        uint32_t keyToRight = *internalNodeKey(node, mid);
+        if (keyToRight >= key) {
+            r = mid;
+        } else {
+            l = mid + 1;
+        }
+    }
+
+    uint32_t childNum = *internalNodeChild(node, l);
+    void* child = getPage(table->pager, childNum);
+    switch (getNodeType(child)) {
+        case NODE_LEAF:
+            return leafNodeFind(table, childNum, key);
+        case NODE_INTERNAL:
+            return internalNodeFind(table, childNum, key);
+    }
 }
 
 NodeType getNodeType(void* node) {

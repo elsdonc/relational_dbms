@@ -215,6 +215,7 @@ void leafNodeInsert(Cursor* cursor, uint32_t key, Row* value);
 
 // binary search for a node
 Cursor* leafNodeFind(Table* table, uint32_t pageNum, uint32_t key);
+Cursor* internalNodeFind(Table* table, uint32_t pageNum, uint32_t key);
 
 // get and set node type
 NodeType getNodeType(void* node);
