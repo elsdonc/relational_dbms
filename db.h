@@ -117,6 +117,21 @@ const uint32_t LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZ
 const uint32_t LEAF_NODE_CELL_SIZE = LEAF_NODE_KEY_SIZE + LEAF_NODE_VALUE_SIZE;
 const uint32_t LEAF_NODE_SPACE_FOR_CELLS = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
 const uint32_t LEAF_NODE_MAX_CELLS = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE;
+const uint32_t LEAF_NODE_RIGHT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) / 2;
+const uint32_t LEAF_NODE_LEFT_SPLIT_COUNT = (LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_RIGHT_SPLIT_COUNT;
+
+// Internal Node Header Layout
+const uint32_t INTERNAL_NODE_NUM_KEYS_SIZE = sizeof(uint32_t);
+const uint32_t INTERNAL_NODE_NUM_KEYS_OFFSET = COMMON_NODE_HEADER_SIZE;
+const uint32_t INTERNAL_NODE_RIGHT_CHILD_SIZE = sizeof(uint32_t);
+const uint32_t INTERNAL_NODE_RIGHT_CHILD_OFFSET =
+    INTERNAL_NODE_NUM_KEYS_OFFSET + INTERNAL_NODE_NUM_KEYS_SIZE;
+const uint32_t INTERNAL_NODE_HEADER_SIZE = COMMON_NODE_HEADER_SIZE + INTERNAL_NODE_NUM_KEYS_SIZE + INTERNAL_NODE_RIGHT_CHILD_SIZE;
+
+// Internal Node Body Layout
+const uint32_t INTERNAL_NODE_KEY_SIZE = sizeof(uint32_t);
+const uint32_t INTERNAL_NODE_CHILD_SIZE = sizeof(uint32_t);
+const uint32_t INTERNAL_NODE_CELL_SIZE = INTERNAL_NODE_CHILD_SIZE + INTERNAL_NODE_KEY_SIZE;
 
 // constructor for an input buffer
 InputBuffer* newInputBuffer();
@@ -135,6 +150,9 @@ void pagerFlush(Pager* pager, uint32_t pageNum);
 
 // handles cache miss
 void* getPage(Pager* pager, uint32_t pageNum);
+
+// allocate new pages
+uint32_t getUnusedPageNum(Pager* pager);
 
 // create new cursors at start of table
 Cursor* tableStart(Table* table);
@@ -187,7 +205,10 @@ uint32_t* leafNodeNumCells(void* node);
 void* leafNodeCell(void* node, uint32_t cellNum);
 uint32_t* leafNodeKey(void* node, uint32_t cellNum);
 void* leafNodeValue(void* node, uint32_t cellNum);
+
+// initializing nodes
 void initializeLeafNode(void* node);
+void initializeInternalNode(void* node);
 
 // insert key/value pair into a leaf node
 void leafNodeInsert(Cursor* cursor, uint32_t key, Row* value);
@@ -199,7 +220,26 @@ Cursor* leafNodeFind(Table* table, uint32_t pageNum, uint32_t key);
 NodeType getNodeType(void* node);
 void setNodeType(void* node, NodeType type);
 
+// split full leaf node in half, allocate a new leaf node, and update or create new parent
+void leafNodeSplitAndInsert(Cursor* cursor, uint32_t key, Row* value);
+
+// create new root node
+void createNewRoot(Table* table, uint32_t rightChildPageNum);
+
+// reading and writing to an internal node
+uint32_t* internalNodeNumKeys(void* node);
+uint32_t* internalNodeRightChild(void* node);
+uint32_t* internalNodeCell(void* node, uint32_t cellNum);
+uint32_t* internalNodeChild(void* node, uint32_t childNum);
+uint32_t* internalNodeKey(void* node, uint32_t keyNum);
+uint32_t getNodeMaxKey(void* node);
+
+// getters and setters for root
+bool isNodeRoot(void* node);
+void setNodeRoot(void* node, bool is_root);
+
 // visualize btree
-void printLeafNode(void* node);
+void printTree(Pager* pager, uint32_t page_num, uint32_t indentation_level);
+void indent(uint32_t level);
 
 #endif // DB_H_
