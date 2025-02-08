@@ -141,13 +141,10 @@ void pagerFlush(Pager* pager, uint32_t pageNum) {
 }
 
 Cursor* tableStart(Table* table) {
-    Cursor* cursor = malloc(sizeof(Cursor));
-    cursor->table = table;
-    cursor->pageNum = table->rootPageNum;
-    cursor->cellNum = 0;
+    Cursor* cursor = tableFind(table, 0);
 
-    void* rootNode = getPage(table->pager, table->rootPageNum);
-    uint32_t numCells = *leafNodeNumCells(rootNode);
+    void* node = getPage(table->pager, cursor->pageNum);
+    uint32_t numCells = *leafNodeNumCells(node);
     cursor->endOfTable = (numCells == 0);
 
     return cursor;
@@ -381,7 +378,14 @@ void cursorAdvance(Cursor* cursor) {
 
     cursor->cellNum += 1;
     if (cursor->cellNum >= (*leafNodeNumCells(node))) {
-        cursor->endOfTable = true;
+        // advance to leaf node
+        uint32_t nextPageNum = *leafNodeNextLeaf(node);
+        if (nextPageNum == 0) {
+            cursor->endOfTable = true;
+        } else {
+            cursor->pageNum = nextPageNum;
+            cursor->cellNum = 0;
+        }
     }
 }
 
@@ -405,10 +409,15 @@ void* leafNodeValue(void* node, uint32_t cellNum) {
     return leafNodeCell(node, cellNum) + LEAF_NODE_KEY_SIZE;
 }
 
+uint32_t* leafNodeNextLeaf(void* node) {
+    return node + LEAF_NODE_NEXT_LEAF_OFFSET;
+}
+
 void initializeLeafNode(void* node) {
     setNodeType(node, NODE_LEAF);
     setNodeRoot(node, false);
     *leafNodeNumCells(node) = 0;
+    *leafNodeNextLeaf(node) = 0;
 }
 
 void leafNodeInsert(Cursor* cursor, uint32_t key, Row* value) {
@@ -439,6 +448,8 @@ void leafNodeSplitAndInsert(Cursor* cursor, uint32_t key, Row* value) {
     uint32_t newPageNum = getUnusedPageNum(cursor->table->pager);
     void* newNode = getPage(cursor->table->pager, newPageNum);
     initializeLeafNode(newNode);
+    *leafNodeNextLeaf(newNode) = *leafNodeNextLeaf(oldNode);
+    *leafNodeNextLeaf(oldNode) = newPageNum;
 
     // split keys between oldNode and newNode
     for (uint32_t i = LEAF_NODE_MAX_CELLS; i >= 0; i--) {
@@ -452,7 +463,8 @@ void leafNodeSplitAndInsert(Cursor* cursor, uint32_t key, Row* value) {
         void* destination = leafNodeCell(destinationNode, indexWithinNode);
 
         if (i == cursor->cellNum) {
-            serializeRow(value, destination);
+            serializeRow(value, leafNodeValue(destinationNode, indexWithinNode));
+            *leafNodeKey(destinationNode, indexWithinNode) = key;
         } else if (i > cursor->cellNum) {
             memcpy(destination, leafNodeCell(oldNode, i-1), LEAF_NODE_CELL_SIZE);
         } else {
